@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "me.tbhmens.privtell.mixins",
+  "compatibilityLevel": "JAVA_16",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "mixins": [
+    "ChatReceivedMixin"
+  ]
+}

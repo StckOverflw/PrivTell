@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "privtell",
+  "version": "${version}",
+  "name": "PrivTell",
+  "description": "/tell, but private and encrypted.",
+  "authors": [
+    "tbhmens"
+  ],
+  "contact": {
+    "homepage": "https://github.com/tbhmens/PrivTell",
+    "issues": "https://github.com/tbhmens/PrivTell/issues",
+    "sources": "https://github.com/tbhmens/PrivTell"
+  },
+  "license": "MIT",
+  "_icon": "none (yet?)",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      {
+        "adapter": "kotlin",
+        "value": "me.tbhmens.privtell.PrivTell"
+      }
+    ]
+  },
+  "mixins": [
+    "privtell.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.11.7",
+    "fabric": "*",
+    "fabric-language-kotlin": ">=1.6.5+kotlin.1.5.31",
+    "minecraft": "1.17.x",
+    "java": ">=16"
+  }
+}
