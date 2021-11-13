@@ -7,6 +7,7 @@ import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.client.command.v1.ClientCommandManager
 import net.fabricmc.fabric.api.client.command.v1.FabricClientCommandSource
 import net.minecraft.client.MinecraftClient
+import net.minecraft.client.network.ClientCommandSource
 import net.minecraft.server.command.CommandManager
 import net.minecraft.server.command.ServerCommandSource
 import net.minecraft.text.*
@@ -17,15 +18,15 @@ import java.util.regex.Pattern
 @Suppress("UNUSED")
 class PrivTell : ModInitializer {
     private lateinit var mc: MinecraftClient
-    private val players: HashMap<String, Core.OtherPlayer> = HashMap()
+    private val players: HashMap<String, OtherPlayer> = HashMap()
     private var lastSent: String? = null
     private lateinit var core: Core
 
     private fun execute(context: CommandContext<ServerCommandSource>): Int {
         val to = PlayerNameArgumentType.getPlayerName(context, "to")
         val message = PlayerNameArgumentType.getPlayerName(context, "message")
-        val encrypted: String
-        if (!players.containsKey(to.lowercase())) {
+        val player = players[to.lowercase()]
+        if (player == null) {
             sendMessage(
                 format(
                     styled(to, Formatting.LIGHT_PURPLE),
@@ -46,20 +47,29 @@ class PrivTell : ModInitializer {
                         }
                 ))
         } else {
-            encrypted = try {
-                players[to.lowercase()]?.encrypt(message).toString()
+            val (encrypted, signature) = try {
+                core.message(player, message)
             } catch (e: java.lang.Exception) {
                 e.printStackTrace()
                 return 1
             }
-            sendTell(to, encrypted)
+            sendTell(to, encrypted, signature)
+            sendMessage(
+                format(
+                    styled("To ", Formatting.WHITE),
+                    styled(to, Formatting.LIGHT_PURPLE),
+                    styled(": ", Formatting.WHITE),
+                    styled(message, Formatting.WHITE)
+                )
+            )
         }
         return 0
     }
 
-    private fun sendTell(to: String, data: String) {
-        val message = String.format("/tell %s ptell`%s,%s`", to, data, mc.session.username)
-        lastSent = data;
+    private fun sendTell(to: String, data: String, signature: String) {
+        val message =
+            "/tell $to ptell`$data,$signature,${mc.session.username}`"
+        lastSent = data
         mc.player!!.sendChatMessage(message)
     }
 
@@ -67,18 +77,32 @@ class PrivTell : ModInitializer {
         mc.player!!.sendMessage(message, false)
     }
 
+    private fun addPubSign(username: String, pubSign: String) {
+        if (players[username] == null)
+            players[username] = OtherPlayer(decodeSignPub(pubSign), null)
+        else
+            players[username]?.pubEnc = decodeSignPub(pubSign)
+    }
+
+    private fun addPubEnc(username: String, pubEnc: String) {
+        if (players[username] == null)
+            players[username] = OtherPlayer(null, decodeEncPub(pubEnc))
+        else
+            players[username]?.pubEnc = decodeEncPub(pubEnc)
+    }
 
     // Called from ChatReceivedMixin
     fun onChatMessage(text: Text): Boolean {
-        val origMessage: String = text.string
+        val origMessage = text.string
         val m: Matcher = ptellRgx.matcher(origMessage)
         if (!m.find()) return false
-        val msg: String = m.group(1)
+        val msg = m.group(1)
         if (msg == lastSent) {
             lastSent = null
             return true
         }
-        val sender: String = m.group(2)
+        val signature = m.group(2)
+        val sender = m.group(3)
         val orig: MutableText = styled(" [Original]", Formatting.DARK_GRAY, Formatting.ITALIC)
             .styled { style: Style ->
                 style.withHoverEvent(
@@ -86,7 +110,8 @@ class PrivTell : ModInitializer {
                 )
             }
         sendMessage(try {
-            if (msg[0] == '?')
+            if (msg[0] == '?') {
+                addPubSign(sender.lowercase(), msg.substring(1))
                 format(
                     styled(sender, Formatting.LIGHT_PURPLE),
                     styled(" has requested your public key. ", Formatting.AQUA),
@@ -94,7 +119,7 @@ class PrivTell : ModInitializer {
                         .styled { style: Style ->
                             style.withClickEvent(
                                 ClickEvent(
-                                    ClickEvent.Action.RUN_COMMAND,
+                                    ClickEvent.Action.SUGGEST_COMMAND,
                                     "/ptell send_pubkey $sender"
                                 )
                             ).withHoverEvent(
@@ -106,35 +131,40 @@ class PrivTell : ModInitializer {
                         },
                     orig
                 )
-            else if (msg[0] == '|') {
-                val next: Core.OtherPlayer = Core.OtherPlayer(msg.substring(1))
-                val prev: Core.OtherPlayer? = players.put(sender.lowercase(), next)
-                if (prev == null) {
-                    format(
-                        styled(sender, Formatting.LIGHT_PURPLE),
-                        styled(
-                            " has given you their public key. You can now send them messages.",
-                            Formatting.GREEN
-                        ),
-                        orig
-                    )
-                } else if (prev.pub != next.pub) {
-                    format(
-                        styled(sender, Formatting.LIGHT_PURPLE),
-                        styled(" has sent you their updated public key.", Formatting.GREEN),
-                        orig
-                    )
-                } else
-                    return true
-            } else
+            } else if (msg[0] == '|') {
+                addPubEnc(sender.lowercase(), msg.substring(1))
                 format(
-                    styled("From ", Formatting.WHITE),
                     styled(sender, Formatting.LIGHT_PURPLE),
-                    styled(": ", Formatting.WHITE),
-                    styled(core.decrypt(msg), Formatting.WHITE),
+                    styled(
+                        " has given you their public key. You can now send them messages.",
+                        Formatting.GREEN
+                    ),
                     orig
                 )
+            } else {
+                //                              TODO: say that player was ignored.
+                val player = players[sender.lowercase()] ?: return true
+                val received = core.receive(player, msg, signature)
+                if (received == null)
+                    format(
+                        styled("Someone pretended to be ", Formatting.WHITE),
+                        styled(sender, Formatting.LIGHT_PURPLE),
+                        styled(", or ", Formatting.WHITE),
+                        styled(sender, Formatting.LIGHT_PURPLE),
+                        styled(" sent you a message with an invalid signature.", Formatting.WHITE),
+                        orig
+                    )
+                else
+                    format(
+                        styled("From ", Formatting.WHITE),
+                        styled(sender, Formatting.LIGHT_PURPLE),
+                        styled(": ", Formatting.WHITE),
+                        styled(received, Formatting.WHITE),
+                        orig
+                    )
+            }
         } catch (e: Exception) {
+            e.printStackTrace()
             styled(
                 "[Error]",
                 Formatting.DARK_RED
@@ -171,7 +201,8 @@ class PrivTell : ModInitializer {
     }
 
     companion object {
-        val ptellRgx: Pattern = Pattern.compile("ptell`(.*),(.*)`")
+        //                                         Message, Signature, Username
+        val ptellRgx: Pattern = Pattern.compile("ptell`(.*),(.*),(.*)`")
         lateinit var instance: PrivTell
     }
 
@@ -188,7 +219,7 @@ class PrivTell : ModInitializer {
                 Core().apply { save(keyfile) }
             // Load key file
             else
-                Core(keyfile)
+                Core.fromFile(keyfile)
 
         } catch (e: java.lang.Exception) {
             e.printStackTrace()
@@ -196,6 +227,10 @@ class PrivTell : ModInitializer {
 
         ClientCommandManager.DISPATCHER.register(
             CommandManager.literal("ptell")
+                .executes(this::help)
+                .then(
+                    CommandManager.literal("help").executes(this::help)
+                )
                 .then(
                     CommandManager.argument("to", PlayerNameArgumentType())
                         .then(
@@ -222,7 +257,8 @@ class PrivTell : ModInitializer {
                                 .executes {
                                     sendTell(
                                         PlayerNameArgumentType.getPlayerName(it, "player"),
-                                        "|" + core.pubb64
+                                        "|" + core.encryptPubB64,
+                                        ""
                                     )
                                     0
                                 })
@@ -232,11 +268,37 @@ class PrivTell : ModInitializer {
                         .then(
                             CommandManager.argument("player", StringArgumentType.string())
                                 .executes {
-                                    sendTell(StringArgumentType.getString(it, "player"), "?")
+                                    sendTell(
+                                        PlayerNameArgumentType.getPlayerName(it, "player"),
+                                        "?" + core.signPubB64,
+                                        ""
+                                    )
                                     0
                                 })
 
                 ) as LiteralArgumentBuilder<FabricClientCommandSource>
         )
+    }
+
+    private fun help(context: CommandContext<ServerCommandSource>): Int {
+        sendMessage(
+            format(
+                styled("/ptell\n", Formatting.LIGHT_PURPLE),
+                styled(" To send someone a message:\n", Formatting.YELLOW),
+                styled("    /ptell <player> <message>\n", Formatting.WHITE),
+                styled("    /ptell msg <player> <message>\n", Formatting.WHITE),
+                styled(
+                    " To ask for someone's public key (and send them your public signing key):\n",
+                    Formatting.YELLOW
+                ),
+                styled("    /ptell ask_pubkey <player>\n", Formatting.WHITE),
+                styled(
+                    " To send someone your public key (it is recommended to only use this in response to ask_pubkey):\n",
+                    Formatting.YELLOW
+                ),
+                styled("    /ptell send_pubkey <player>\n", Formatting.WHITE),
+            )
+        )
+        return 0
     }
 }

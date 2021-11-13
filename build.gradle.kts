@@ -1,7 +1,9 @@
 plugins {
     id("fabric-loom")
     val kotlinVersion: String by System.getProperties()
-    kotlin("jvm").version(kotlinVersion)
+    kotlin("jvm") version kotlinVersion
+    kotlin("plugin.serialization") version kotlinVersion
+
 }
 base {
     val archivesBaseName: String by project

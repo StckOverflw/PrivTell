@@ -1,10 +1,8 @@
 package me.tbhmens.privtell
 
-import com.mojang.authlib.GameProfile
 import com.mojang.brigadier.StringReader
 import com.mojang.brigadier.arguments.ArgumentType
 import com.mojang.brigadier.context.CommandContext
-import com.mojang.brigadier.exceptions.CommandSyntaxException
 import com.mojang.brigadier.suggestion.Suggestions
 import com.mojang.brigadier.suggestion.SuggestionsBuilder
 import net.minecraft.command.CommandSource
@@ -38,12 +36,6 @@ class PlayerNameArgumentType : ArgumentType<String> {
     override fun getExamples(): Collection<String> {
         return listOf("Player")
     }
-
-    fun interface GameProfileArgument {
-        @Throws(CommandSyntaxException::class)
-        fun getNames(source: ServerCommandSource?): Collection<GameProfile>
-    }
-
 
     companion object {
         fun getPlayerName(

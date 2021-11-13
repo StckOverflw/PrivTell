@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "privtell",
-  "version": "${version}",
+  "version": "1.1.0",
   "name": "PrivTell",
   "description": "/tell, but private and encrypted.",
   "authors": [
